@@ -3,18 +3,18 @@
 # Determine if a customer will default on a mobile loan.
 #
 # # Process
+# * Merge datasets
+#   * Summarise historic loans
+#   * Check duplicates
+#   * Merge data
 # * EDA
-#   * Duplicates
-#   * Data types
+#   * Fix data types
 #   * Independent variable
-#   * Dependent vars: nulls, impute*
-#   * Numeric vars: mean, median, range, scaling
+#   * Dependent vars: nulls impute*
+#   * Numeric vars: mean median, range, scaling
 #   * Categorical vars: unique values
 #   * Dates: ages, month of year, day of month
 #   * Coordinates: administrative regions
-# * Merge datasets
-#   * Impute*
-#   * Drop variables
 # * Encoding
 #   * Label
 #   * One hot
@@ -26,14 +26,32 @@
 # %%
 import pandas as pd
 import numpy as np
-
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
+import dill
 
 from arcgis.gis import GIS
 from arcgis.geocoding import reverse_geocode
 
 from datetime import datetime
+from smote_variants import MWMOTE
+
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.svm import SVC
+from sklearn.naive_bayes import GaussianNB
+
+from sklearn.model_selection import (
+    train_test_split,
+    StratifiedKFold,
+    RandomizedSearchCV,
+)
+from sklearn.metrics import roc_auc_score
+from sklearn.feature_selection import SelectKBest, mutual_info_classif
 
 # %% [markdown]
 # # Data importation
@@ -163,8 +181,7 @@ trainprevloans_summ.shape
 trainprevloans_summ.head()
 
 # %% [markdown]
-# ## Merge all datasets
-# ### Check duplicates
+# ## Check duplicates
 
 # %%
 len(trainperf_proc.customerid) == len(pd.unique(trainperf_proc.customerid))
@@ -178,7 +195,7 @@ traindemographics_proc = traindemographics_proc.drop_duplicates(
 )
 
 # %% [markdown]
-# ### Merge datasets
+# ## Merge all datasets
 
 # %%
 merge_1 = pd.merge(
@@ -209,7 +226,7 @@ train_merged_proc.dtypes
 train_merged_proc = convert_dates(train_merged_proc)
 
 # %% [markdown]
-# ## Outcome variable
+# ## Dependent variable
 
 # %%
 train_merged_proc.good_bad_flag.isnull().sum()
@@ -227,10 +244,11 @@ train_merged_proc.good_bad_flag.value_counts() / len(
 train_merged_proc["good_bad_flag"] = train_merged_proc[
     "good_bad_flag"
 ].replace({"Good": 1, "Bad": 0})
+
 train_merged_proc.good_bad_flag.value_counts()
 
 # %% [markdown]
-# ## Check null values
+# ## Null values
 # Drop variables with >20% missingness and impute the rest.
 
 # %%
@@ -247,7 +265,7 @@ train_merged_proc.shape
 # %%
 imp = SimpleImputer(
     strategy="most_frequent"
-)  # TODO: replace with Random Forest
+)  # TODO: replace with RandomForest
 
 # %%
 train_merged_proc = pd.DataFrame(
@@ -325,7 +343,7 @@ train_merged_proc.bank_name_clients.value_counts()  # TODO: replace with bank ti
 # train_merged_proc.bank_name_clients.value_counts().to_csv("../outputs/banks.csv")
 
 # %% [markdown]
-# ## Dates
+# ## Date variables
 # Change date columns to numeric.
 
 # %%
@@ -371,3 +389,201 @@ train_merged_proc.head()
 # loc_res
 
 # ((traindemographics_proc.shape[0]/3)*0.9)/60
+
+# %% [markdown]
+# ## Identifier vars
+
+# %%
+train_merged_proc.columns.str.endswith("id")
+train_merged_proc.columns[train_merged_proc.columns.str.endswith("id")]
+
+# %%
+train_merged_proc = train_merged_proc.drop(
+    columns=train_merged_proc.columns[
+        train_merged_proc.columns.str.endswith("id")
+    ]
+)
+train_merged_proc.shape
+
+# %% [markdown]
+# # Encoding
+# We shall do one-hot encoding.
+
+# %%
+train_merged_proc.select_dtypes(include=object).head()
+
+# %%
+train_merged_proc_y = train_merged_proc.good_bad_flag
+train_merged_proc_X = train_merged_proc.drop(columns=["good_bad_flag"])
+
+# %% [markdown]
+# ## Dummer
+# This is a helper dataframe for ensuring that we get consistent dummification results. Especially useful for handling single responses.
+
+# %%
+train_merged_proc_X.select_dtypes(include=object)
+
+dummer_dict = dict()
+for col in train_merged_proc_X.select_dtypes(include=object).columns:
+    dummer_dict[col] = pd.unique(train_merged_proc_X[col])
+
+dummer_dict
+
+# %%
+dummer_df = pd.DataFrame.from_dict(dummer_dict, orient="index").transpose()
+dummer_df
+
+# %% [markdown]
+# ## Dummies
+
+# %%
+train_merged_proc_X = pd.get_dummies(train_merged_proc_X, drop_first=False)
+train_merged_proc_X.shape
+
+# %% [markdown]
+# # MWMOTE
+
+# %%
+oversampler = MWMOTE(random_state=123, n_jobs=-1)
+
+# %%
+train_sm_X, train_sm_y = oversampler.sample(
+    X=np.asarray(train_merged_proc_X), y=train_merged_proc_y
+)
+
+train_sm_X.shape
+
+# %%
+np.unique(train_sm_y, return_counts=True)
+
+# %%
+train_sm_X = pd.DataFrame(train_sm_X, columns=train_merged_proc_X.columns)
+train_sm_y = train_sm_y.tolist()
+
+# %% [markdown]
+# # Model training
+# ## Model selection
+
+# %%
+dt = DecisionTreeClassifier(random_state=123)
+rf = RandomForestClassifier(random_state=123)
+gb = GradientBoostingClassifier(random_state=123)
+svm = SVC(random_state=123)
+knn = KNeighborsClassifier()
+nn = MLPClassifier(random_state=123)
+
+# %% [markdown]
+# ## Cross validation
+
+# %%
+kf = StratifiedKFold()
+
+# %% [markdown]
+# ## Hyper-parameter tuning
+# Random search tuning on selected parameters.
+
+# %%
+dt_params = {
+    "max_depth": np.arange(1, 5),
+    "min_samples_leaf": np.arange(2, 10, 2),
+    "max_features": ["auto"],
+    "max_leaf_nodes": np.arange(1, 10),
+}
+
+rf_params = {
+    "max_depth": np.arange(3, 7),
+    "max_samples": np.arange(2, 9),
+    "max_leaf_nodes": np.arange(1, 10),
+}
+
+gb_params = {
+    "n_estimators": [50, 100, 150],
+    "min_samples_leaf": np.arange(1, 10),
+    "max_depth": np.arange(3, 7),
+}
+
+knn_params = {"n_neighbors": [3, 5, 7, 10], "leaf_size": [10, 20, 30]}
+
+svm_params = {
+    "C": [1.0, 2.0, 3.0, 4.0, 5.0],
+    "max_iter": [5, 10],
+    "probability": [True],
+}
+
+nn_params = {
+    "random_state": [123],
+    "early_stopping": [True],
+    "max_iter": [100],
+}
+
+# %%
+dt_cv = RandomizedSearchCV(
+    estimator=dt,
+    param_distributions=dt_params,
+    scoring="roc_auc",
+    n_jobs=-1,
+    cv=kf,
+    random_state=123,
+    return_train_score=True,
+)
+rf_cv = RandomizedSearchCV(
+    estimator=rf,
+    param_distributions=rf_params,
+    scoring="roc_auc",
+    n_jobs=-1,
+    cv=kf,
+    random_state=123,
+    return_train_score=True,
+)
+gb_cv = RandomizedSearchCV(
+    estimator=gb,
+    param_distributions=gb_params,
+    scoring="roc_auc",
+    n_jobs=-1,
+    cv=kf,
+    random_state=123,
+    return_train_score=True,
+)
+knn_cv = RandomizedSearchCV(
+    estimator=knn,
+    param_distributions=knn_params,
+    scoring="roc_auc",
+    n_jobs=-1,
+    cv=kf,
+    random_state=123,
+    return_train_score=True,
+)
+svm_cv = RandomizedSearchCV(
+    estimator=svm,
+    param_distributions=svm_params,
+    scoring="roc_auc",
+    n_jobs=-1,
+    cv=kf,
+    random_state=123,
+    return_train_score=True,
+)
+nn_cv = RandomizedSearchCV(
+    estimator=nn,
+    param_distributions=nn_params,
+    scoring="roc_auc",
+    n_jobs=-1,
+    cv=kf,
+    random_state=123,
+    return_train_score=True,
+)
+
+# %% [markdown]
+# ## Fit models
+
+# %%
+dt_cv.fit(X=train_sm_X, y=train_sm_y)
+rf_cv.fit(X=train_sm_X, y=train_sm_y)
+gb_cv.fit(X=train_sm_X, y=train_sm_y)
+svm_cv.fit(X=train_sm_X, y=train_sm_y)
+knn_cv.fit(X=train_sm_X, y=train_sm_y)
+
+# %% [markdown]
+# # Export
+
+# %%
+dill.dump_session(filename="../outputs/07_Feb.pkl")
