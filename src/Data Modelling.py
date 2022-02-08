@@ -333,10 +333,10 @@ train_merged_proc.isnull().sum() / train_merged_proc.shape[0]
 
 # %%
 train_merged_proc.isnull().sum() / train_merged_proc.shape[0] > 0.3
-cols_drop = train_merged_proc.columns[
+null_cols = train_merged_proc.columns[
     train_merged_proc.isnull().sum() / train_merged_proc.shape[0] > 0.3
 ]
-train_merged_proc = train_merged_proc.drop(columns=cols_drop)
+train_merged_proc = train_merged_proc.drop(columns=null_cols)
 train_merged_proc.shape
 
 # %%
@@ -348,18 +348,29 @@ test_merged_proc = test_merged_proc[
 test_merged_proc.shape
 
 # %%
-imp = SimpleImputer(
+imputer = SimpleImputer(
     strategy="most_frequent"
 )  # TODO: replace with RandomForest
 
+train_imp = train_merged_proc.drop(columns="good_bad_flag")
+imputer.fit(X=train_imp)
+
 # %%
-train_merged_proc = pd.DataFrame(
-    imp.fit_transform(X=train_merged_proc), columns=train_merged_proc.columns
-)
 test_merged_proc = pd.DataFrame(
-    imp.fit_transform(X=test_merged_proc), columns=test_merged_proc.columns
+    imputer.transform(X=test_merged_proc[imputer.feature_names_in_]),
+    columns=imputer.feature_names_in_,
 )
+
+train_merged_proc = pd.DataFrame(
+    imputer.transform(X=train_imp), columns=train_imp.columns
+).assign(good_bad_flag=train_merged_proc.good_bad_flag)
+
 train_merged_proc.shape
+
+# %%
+imputer.feature_names_in_
+imputer.statistics_
+{k: v for k, v in zip(imputer.feature_names_in_, imputer.statistics_)}
 
 # %% [markdown]
 # ## Numeric variables
@@ -828,9 +839,6 @@ default_probs = nn_cv.predict_proba(base_probs_te)[:, 0]
 nn_preds = nn_cv.predict(base_probs_te)
 nn_preds
 
-# %%
-# NEXT: model evaluation, optimisation
-
 # %% [markdown]
 # # Evaluate model
 
@@ -904,7 +912,7 @@ plt.show()
 
 # %% [markdown]
 # ## Adjusted threshold
-# This is the new PD cut-off. If PD is greater than this, the customer is flagged as likely to default.
+# This is the new PD cut-off (**0.2048780487804878**). If PD is greater than this, the customer is flagged as likely to default.
 
 # %%
 op_thr = op["x"][0]
@@ -936,6 +944,33 @@ print(f"Accuracy in predicting 1 [no default]: { class_1 }")
 # # Export
 
 # %%
+api_data = {
+    "train_X": train_X,
+    "scaler": scaler,
+    "dummer_df": dummer_df,
+    "null_cols": null_cols,
+    "scale_cols": sc_cols,
+    "op_thr": op_thr,
+    "imputer": imputer,
+}
+
+api_models = {
+    "dt_cv": dt_cv,
+    "rf_cv": rf_cv,
+    "gb_cv": gb_cv,
+    "svm_cv": svm_cv,
+    "knn_cv": knn_cv,
+    "nn_cv": nn_cv,
+}
+
+# %%
+with open(file="../outputs/api_data.pkl", mode="wb") as f:
+    dill.dump(obj=api_data, file=f)
+
+with open(file="../outputs/api_models.pkl", mode="wb") as f:
+    dill.dump(obj=api_models, file=f)
+
+# %%
 ts = datetime.now()
 tm = datetime.strftime(ts, "%d_%b")
 
@@ -943,4 +978,4 @@ dill.dump_session(filename=f"../outputs/{tm}.pkl")
 
 # %%
 # import dill
-# dill.load_session("../outputs/07_Feb.pkl")
+# dill.load_session("../outputs/08_Feb.pkl")
