@@ -1,9 +1,14 @@
 import dill
+import os
 import pandas as pd
 from typing import Tuple
 
+PICKLE_DIR = "./outputs/"
 
-class Loader:
+
+class Scorer:
+    """This class handles credit scoring."""
+
     def __init__(self) -> None:
         pass
 
@@ -23,15 +28,19 @@ class Loader:
         return dt_cv, rf_cv, gb_cv, svm_cv, knn_cv, nn_cv
 
     @staticmethod
-    def load_test_data() -> tuple:
-        """Load test data and optimised threshold"""
-        with open(file="./outputs/api_data.pkl", mode="rb") as f:
+    def load_test_data(items: list) -> tuple:
+        """
+        items: a list containing items to retrieve
+        """
+
+        with open(
+            file=os.path.join(PICKLE_DIR, "api_data.pkl"), mode="rb"
+        ) as f:
             data_objs = dill.load(file=f)
 
-            train_X = data_objs.get("train_X")
-            op_thr = data_objs.get("op_thr")
+            res = [data_objs.get(item, "Item not found") for item in items]
 
-        return train_X, op_thr
+        return res
 
     def obtain_preds(
         self, data: pd.DataFrame, op_thr: float
@@ -58,13 +67,13 @@ class Loader:
 
         base_probs = [dt_probs, rf_probs, gb_probs, svm_probs, knn_probs]
 
-        base_df = pd.DataFrame()
+        base_data = pd.DataFrame()
 
         for p in base_probs:
-            temp_df = pd.DataFrame(p)
-            base_df = pd.concat(objs=[base_df, temp_df], axis=1)
+            temp_data = pd.DataFrame(p)
+            base_data = pd.concat(objs=[base_data, temp_data], axis=1)
 
-        base_df.columns = [
+        base_data.columns = [
             "dt_probs",
             "rf_probs",
             "gb_probs",
@@ -72,8 +81,8 @@ class Loader:
             "knn_probs",
         ]
 
-        default_probs = nn_cv.predict_proba(base_df)[:, 0]
-        default_preds = nn_cv.predict(base_df)
+        default_probs = nn_cv.predict_proba(base_data)[:, 0]
+        default_preds = nn_cv.predict(base_data)
         default_preds = default_preds.tolist()
 
         adjusted_preds = [
