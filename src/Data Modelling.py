@@ -903,8 +903,9 @@ plt.plot(
 
 # plt.plot([0, 1], [0, 1], color="navy", linestyle="--")
 plt.xlabel("False Positive Rate")
-plt.axvline(x=op["x"][0], color="green")
-plt.axhline(y=op["y"][0], color="green")
+plt.axvline(x=op["x"][0], color="green", linestyle="--", label="Adjusted PD")
+plt.axhline(y=op["y"][0], color="green", linestyle="--")
+plt.axvline(x=0.5, color="navy", linestyle="--", label="Default PD")
 plt.ylabel("True Positive Rate")
 plt.title("Mobile Lending ROC Curve")
 plt.legend(loc="lower right")
