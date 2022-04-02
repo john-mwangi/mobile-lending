@@ -446,7 +446,7 @@ def scale_data(testdata, scaler, sc_cols):
         objs=[
             testdata.drop(columns=sc_cols),
             pd.DataFrame(
-                scaler.fit_transform(X=testdata[sc_cols]), columns=sc_cols
+                scaler.transform(X=testdata[sc_cols]), columns=sc_cols
             ),
         ],
         axis=1,
@@ -688,52 +688,100 @@ nn_params = {
     "max_iter": [100],
 }
 
+# %% [markdown]
+# Function that:
+# - accepts any number of model classes
+# - initialises a randomised search class instance
+# - fits the initialised class
+# - returns probabilities of the fitted models
+
 # %%
-dt_cv = RandomizedSearchCV(
-    estimator=dt,
-    param_distributions=dt_params,
-    scoring="roc_auc",
-    n_jobs=-1,
-    cv=kf,
-    random_state=123,
-    return_train_score=True,
+def run_train(
+    models,
+    model_names,
+    model_params,
+    train_X=train_X,
+    train_y=train_y,
+    test_X=test_X,
+):
+    """Generate base probabilities.
+
+    Performs cross-validation, hyper-parameter tuning, prediction
+
+    models: tuple of instantiated model classes
+    model_names: tuple of names to assign the models
+    model_params: tuple of param_distributios for randomised hyper-parameter tuning
+    """
+    probs_tr = {}
+    probs_te = {}
+    fitted_models = {}
+    for model, model_name, model_param in zip(
+        models, model_names, model_params
+    ):
+        temp_cv = RandomizedSearchCV(
+            estimator=model,
+            param_distributions=model_param,
+            scoring="roc_auc",
+            n_jobs=-1,
+            cv=kf,
+            random_state=123,
+            return_train_score=True,
+        )
+        temp_cv.fit(X=train_X, y=train_y)
+        tr_probs = temp_cv.predict_proba(train_X)[:, 0]
+        te_probs = temp_cv.predict_proba(test_X)[:, 0]
+        probs_tr[model_name] = tr_probs
+        probs_te[model_name] = te_probs
+        fitted_models[model_name] = temp_cv
+
+    return probs_tr, probs_te, fitted_models
+
+
+# %%
+models = (dt, rf, gb, knn, svm)
+model_params = (dt_params, rf_params, gb_params, knn_params, svm_params)
+model_names = ("dt", "rf", "gb", "knn", "svm")
+
+probs_tr, probs_te, fitted_models = run_train(
+    models=models, model_names=model_names, model_params=model_params
 )
-rf_cv = RandomizedSearchCV(
-    estimator=rf,
-    param_distributions=rf_params,
-    scoring="roc_auc",
-    n_jobs=-1,
-    cv=kf,
-    random_state=123,
-    return_train_score=True,
-)
-gb_cv = RandomizedSearchCV(
-    estimator=gb,
-    param_distributions=gb_params,
-    scoring="roc_auc",
-    n_jobs=-1,
-    cv=kf,
-    random_state=123,
-    return_train_score=True,
-)
-knn_cv = RandomizedSearchCV(
-    estimator=knn,
-    param_distributions=knn_params,
-    scoring="roc_auc",
-    n_jobs=-1,
-    cv=kf,
-    random_state=123,
-    return_train_score=True,
-)
-svm_cv = RandomizedSearchCV(
-    estimator=svm,
-    param_distributions=svm_params,
-    scoring="roc_auc",
-    n_jobs=-1,
-    cv=kf,
-    random_state=123,
-    return_train_score=True,
-)
+
+# %%
+assert len(probs_tr.get("dt")) == train_X.shape[0]
+assert len(probs_te.get("dt")) == test_X.shape[0]
+fitted_models.get("dt")
+
+# %% [markdown]
+# ## Predict
+# Probability of default from base models to generate training data for ensemble model.
+
+# %%
+def base_probs(base_probs):
+    """Convert base probabilities to dataframe.
+
+    :param base_probs: dictionary containing base probabilities of each model
+    """
+    base_df = pd.DataFrame()
+
+    for k, p in base_probs.items():
+        temp_df = pd.DataFrame(p, columns=[k])
+        base_df = pd.concat(objs=[base_df, temp_df], axis=1)
+
+    return base_df
+
+
+# %%
+base_probs_tr = base_probs(probs_tr)
+base_probs_tr.shape
+
+# %%
+base_probs_tr
+
+# %% [markdown]
+# # Stacked model
+# ## Fit model
+
+# %%
 nn_cv = RandomizedSearchCV(
     estimator=nn,
     param_distributions=nn_params,
@@ -743,72 +791,6 @@ nn_cv = RandomizedSearchCV(
     random_state=123,
     return_train_score=True,
 )
-
-# %% [markdown]
-# ## Fit models
-
-# %%
-dt_cv.fit(X=train_X, y=train_y)
-rf_cv.fit(X=train_X, y=train_y)
-gb_cv.fit(X=train_X, y=train_y)
-svm_cv.fit(X=train_X, y=train_y)
-knn_cv.fit(X=train_X, y=train_y)
-
-# %% [markdown]
-# ## Predict
-# Probability of default from base models to generate training data for ensemble model.
-
-# %%
-dt_probs_tr = dt_cv.predict_proba(train_X)[:, 0]
-rf_probs_tr = rf_cv.predict_proba(train_X)[:, 0]
-gb_probs_tr = gb_cv.predict_proba(train_X)[:, 0]
-svm_probs_tr = svm_cv.predict_proba(train_X)[:, 0]
-knn_probs_tr = knn_cv.predict_proba(train_X)[:, 0]
-
-# %%
-def base_probs(base_probs):
-    """
-    Convert base probabilities to dataframe.
-    :param base_probs: list of base probabilities in the order below \n
-    ["dt_probs", "rf_probs", "gb_probs", "svm_probs", "knn_probs"]
-    """
-    base_df = pd.DataFrame()
-
-    for p in base_probs:
-        temp_df = pd.DataFrame(p)
-        base_df = pd.concat(objs=[base_df, temp_df], axis=1)
-
-    base_df.columns = [
-        "dt_probs",
-        "rf_probs",
-        "gb_probs",
-        "svm_probs",
-        "knn_probs",
-    ]
-
-    return base_df
-
-
-# %%
-base_probs_tr = base_probs(
-    base_probs=[
-        dt_probs_tr,
-        rf_probs_tr,
-        gb_probs_tr,
-        svm_probs_tr,
-        knn_probs_tr,
-    ]
-)
-base_probs_tr.shape
-
-# %%
-base_probs_tr.head()
-
-# %% [markdown]
-# # Stacked model
-# ## Fit model
-
-# %%
 nn_cv.fit(X=base_probs_tr, y=train_y)
 
 # %% [markdown]
@@ -816,22 +798,7 @@ nn_cv.fit(X=base_probs_tr, y=train_y)
 # These represent the probabilities of defaults of the test set.
 
 # %%
-dt_probs_te = dt_cv.predict_proba(test_X)[:, 0]
-rf_probs_te = rf_cv.predict_proba(test_X)[:, 0]
-gb_probs_te = gb_cv.predict_proba(test_X)[:, 0]
-svm_probs_te = svm_cv.predict_proba(test_X)[:, 0]
-knn_probs_te = knn_cv.predict_proba(test_X)[:, 0]
-
-# %%
-base_probs_te = base_probs(
-    base_probs=[
-        dt_probs_te,
-        rf_probs_te,
-        gb_probs_te,
-        svm_probs_te,
-        knn_probs_te,
-    ]
-)
+base_probs_te = base_probs(base_probs=probs_te)
 base_probs_te.shape
 
 # %%
@@ -955,14 +922,7 @@ api_data = {
     "imputer": imputer,
 }
 
-api_models = {
-    "dt_cv": dt_cv,
-    "rf_cv": rf_cv,
-    "gb_cv": gb_cv,
-    "svm_cv": svm_cv,
-    "knn_cv": knn_cv,
-    "nn_cv": nn_cv,
-}
+api_models = {"fitted_base_models": fitted_models, "nn_cv": nn_cv}
 
 # %%
 with open(file="../outputs/api_data.pkl", mode="wb") as f:
