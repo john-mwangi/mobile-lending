@@ -689,6 +689,8 @@ nn_params = {
 }
 
 # %% [markdown]
+# ## Fit models
+#
 # Function that:
 # - accepts any number of model classes
 # - initialises a randomised search class instance
@@ -697,26 +699,20 @@ nn_params = {
 
 # %%
 def run_train(
-    models,
-    model_names,
-    model_params,
-    train_X=train_X,
-    train_y=train_y,
-    test_X=test_X,
+    models, model_params, train_X=train_X, train_y=train_y, test_X=test_X
 ):
     """Generate base probabilities.
 
     Performs cross-validation, hyper-parameter tuning, prediction
 
-    models: tuple of instantiated model classes
-    model_names: tuple of names to assign the models
+    models: dictionary of instantiated model classes whose keys are the model names
     model_params: tuple of param_distributios for randomised hyper-parameter tuning
     """
     probs_tr = {}
     probs_te = {}
     fitted_models = {}
-    for model, model_name, model_param in zip(
-        models, model_names, model_params
+    for model_name, model, model_param in zip(
+        models.keys(), models.values(), model_params
     ):
         temp_cv = RandomizedSearchCV(
             estimator=model,
@@ -738,12 +734,11 @@ def run_train(
 
 
 # %%
-models = (dt, rf, gb, knn, svm)
+models = {"dt": dt, "rf": rf, "gb": gb, "knn": knn, "svm": svm}
 model_params = (dt_params, rf_params, gb_params, knn_params, svm_params)
-model_names = ("dt", "rf", "gb", "knn", "svm")
 
 probs_tr, probs_te, fitted_models = run_train(
-    models=models, model_names=model_names, model_params=model_params
+    models=models, model_params=model_params
 )
 
 # %%
