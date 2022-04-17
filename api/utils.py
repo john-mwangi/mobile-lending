@@ -2,10 +2,12 @@ import dill
 import os
 import pandas as pd
 from typing import Tuple
+from dataclasses import dataclass
 
 PICKLE_DIR = "./outputs/"
 
 
+@dataclass
 class Scorer:
     """This class handles credit scoring."""
 
@@ -15,7 +17,9 @@ class Scorer:
     @staticmethod
     def load_models() -> tuple:
         """Load fitted models."""
-        with open(file="./outputs/api_models.pkl", mode="rb") as f:
+        with open(
+            file=os.path.join(PICKLE_DIR, "api_models.pkl"), mode="rb"
+        ) as f:
             model_objs = dill.load(file=f)
 
             dt_cv = model_objs.get("dt_cv")
@@ -28,7 +32,7 @@ class Scorer:
         return dt_cv, rf_cv, gb_cv, svm_cv, knn_cv, nn_cv
 
     @staticmethod
-    def load_test_data(items: list) -> tuple:
+    def load_test_data(items: list) -> list:
         """
         items: a list containing items to retrieve
         """
@@ -38,7 +42,10 @@ class Scorer:
         ) as f:
             data_objs = dill.load(file=f)
 
-            res = [data_objs.get(item, "Item not found") for item in items]
+            res = [
+                data_objs.get(item, f"Item '{item}' not found")
+                for item in items
+            ]
 
         return res
 
@@ -46,7 +53,7 @@ class Scorer:
         self, data: pd.DataFrame, op_thr: float
     ) -> Tuple[list, list]:
         """
-        Retunrs predictions given input data. \n
+        Returns predictions given input data. \n
         Args
         ----
         data: Data on which you want predictions.

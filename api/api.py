@@ -36,7 +36,6 @@ def fetch_predictions(resp=train_X_json):
     )
 
     return {
-        "Loaded models": len(sc.load_models()),
         "Train X": train_X.shape,
         "Default preds": default_preds,
         "Adjusted preds": adjusted_preds,
